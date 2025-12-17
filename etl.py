@@ -2,23 +2,21 @@ import pandas as pd
 import glob
 import os
 
-#Verificar que los archivos se hayan descargado
-archivos = glob.glob('data/ecommerce_*.csv')
+# Verificar archivos 
+archivos = glob.glob('data/ecommerce_*.csv') # Asegurate que la ruta data/ sea correcta en tu PC
 if not archivos:
-    print("❌ No se descargaron los archivos, intentá descargarlos y moverlo a la carpeta data")
-    print("   Deberías tener: ecommerce_orders.csv, ecommerce_customers.csv, etc.")
+    print("❌ No se encontraron archivos en data/")
 else:
-    print(f" Archivos encontrados: {len(archivos)}")
-    for i in sorted(archivos):
-        print(f" - {os.path.basename(i)}")
-        
-#Cargar CSV principales
+    print(f"✅ Archivos encontrados: {len(archivos)}")
+
+# Cargar CSV
 df_orders = pd.read_csv('data/ecommerce_orders.csv')
 df_order_items = pd.read_csv('data/ecommerce_order_items.csv')
 df_customers = pd.read_csv('data/ecommerce_customers.csv')
 df_products = pd.read_csv('data/ecommerce_products.csv')
 
-# Explorar
+# --- Exploramos dataframe --- 
+
 print(f"\n📈 Resumen:")
 print(f'Orders: {len(df_orders)} filas, {len(df_orders.columns)} columnas.')
 print(f'Orders items: {len(df_order_items)} filas.')
@@ -30,87 +28,79 @@ print(df_orders.head())
 print("\n📋 Info de orders:")
 print(df_orders.info())
 
-#Ver nulos en columnas
+# --- LIMPIEZA ---
+
+#Vemos si hay columnas nulas
 print(f"\nValores nulos por columnas:")
 print(df_orders.isnull().sum())
 
-# Decisión: ¿eliminar o rellenar?
-# Si son pocos (<5%), podemos eliminar
-# Si son muchos, mejor rellenar con un valor por defecto
+# Rellenamos con string vacío en lugar de borrar la fila
+df_orders['notes'] = df_orders['notes'].fillna('')
+df_orders['promotion_id'] = df_orders['promotion_id'].fillna(0)
 
-#Eliminamos valores nulos de notas
-df_orders_clean = df_orders.dropna(subset= ['notes']).copy()
+#Visualizamos sin strings vacios
+print("\nLista con valores NaN rellenas")
+print(df_orders.head())
 
-#Rellenamos valores nulos de promotion_id
-df_orders_clean.loc[:, 'promotion_id'] = df_orders_clean['promotion_id'].fillna(0)
+#Verificamos tipos de datos
+print('\n Tipos de datos:')
+print(df_orders.dtypes)
 
-#Valores luego de corregir nulos
-print(f"Filas antes: {len(df_orders)}, después: {len(df_orders_clean)}")
+# Conversión de tipos
+df_orders['order_date'] = pd.to_datetime(df_orders['order_date'])
+df_orders['total_amount'] = pd.to_numeric(df_orders['total_amount'], errors='coerce')
+df_orders['discount_percent'] = pd.to_numeric(df_orders['discount_percent'], errors='coerce')
 
-#Verificar duplicados
-duplicados = df_orders_clean.duplicated().sum()
-print(f"Valores duplicados encontrados: {duplicados}")
+#Luego de la corrección de datos
+print("\n Tipos de datos después de correcciones: ")
+print(df_orders.dtypes)
 
-
-#Verificar duplicados en columnas especificas
-duplicados_id= df_orders_clean.duplicated(subset= ['order_id']).sum()
+#Verificamos valores duplicados 
+duplicados_id= df_orders.duplicated(subset= ['order_id']).sum()
 print(f'\n Order_id duplicadas: {duplicados_id}')
 
-# Eliminar duplicados
-df_orders_clean = df_orders_clean.drop_duplicates()
+# Eliminar duplicados reales
+df_orders_clean = df_orders.drop_duplicates()
+df_orders_clean = df_orders_clean.sort_values('order_date').drop_duplicates(subset=['order_id'], keep='last')
 
-# Si hay IDs duplicados, quedarse con el más reciente
-df_orders_clean = df_orders_clean.sort_values('order_date').drop_duplicates(
-    subset=['order_id'], 
-    keep='last')
 
-# Ver tipos actuales
-print(df_orders_clean.dtypes)
+# --- LÓGICA DE NEGOCIO ---
 
-#Convertir fechas
-df_orders_clean['order_date'] = pd.to_datetime(df_orders_clean['order_date'])
+# 2. CORRECCIÓN: Filtrar órdenes canceladas para el análisis de ventas
+# Creamos un DF auxiliar solo con ventas efectivas
+df_ventas_validas = df_orders_clean[df_orders_clean['status'] != 'cancelado'].copy()
 
-#Convertir a float
-df_orders_clean['discount_percent'] = df_orders_clean['discount_percent'].astype('float64')
-df_orders_clean['shipping_cost'] = df_orders_clean['shipping_cost'].astype('float64')
-
-#Convertimos status
-df_orders_clean['status'] = df_orders_clean['status'].astype('category')
-df_orders_clean['payment_method'] = df_orders_clean['payment_method'].astype('category')
-
-# Asegurar que los números sean numéricos
-df_orders_clean['total_amount'] = pd.to_numeric(df_orders_clean['total_amount'], errors='coerce')
-
-# Verificar
-print("\nTipos después de conversión:")
-print(df_orders_clean.dtypes)
-
-# PREGUNTA 1: Top 5 clientes por gasto total
-# Agrupamos por customer_id y sumamos total_amount
-ventas_cliente = df_orders_clean.groupby('customer_id').agg({
-  'total_amount': 'sum',
-  'order_id': 'count'
+# PREGUNTA 1: Top 5 clientes (Usando ventas válidas)
+ventas_cliente = df_ventas_validas.groupby('customer_id').agg({
+    'total_amount': 'sum',
+    'order_id': 'count'
 }).rename(columns={'total_amount': 'total_gastado', 'order_id': 'cantidad_ordenes'})
-ventas_cliente = ventas_cliente.sort_values('total_gastado', ascending=False)
-print("🏆 Top 5 clientes:")
+
+# Reseteamos el índice para que customer_id sea una columna al guardar
+ventas_cliente = ventas_cliente.reset_index().sort_values('total_gastado', ascending=False)
+
+print("\n🏆 Top 5 clientes:")
 print(ventas_cliente.head())
 
 # PREGUNTA 2: Producto más vendido
-# Primero unimos orders con order_items para tener quantity
-# Agrupamos por product_id y sumamos quantity
-productos_vendidos = df_order_items.groupby('product_id')['quantity'].sum().sort_values(ascending=False)
-print(f"\n📦 Producto más vendido: ID {productos_vendidos.idxmax()} ({productos_vendidos.max()} unidades)")
+# Filtramos los items para que coincidan solo con órdenes válidas
+items_validos = df_order_items[df_order_items['order_id'].isin(df_ventas_validas['order_id'])]
+
+productos_vendidos = items_validos.groupby('product_id')['quantity'].sum().reset_index()
+productos_vendidos = productos_vendidos.sort_values('quantity', ascending=False)
+print(f"\n📦 Producto más vendido ID: {productos_vendidos.iloc[0]['product_id']}")
 
 # PREGUNTA 3: Evolución mensual de ventas
-# Agrupamos por mes y sumamos total_amount
+
 df_orders_clean['mes'] = df_orders_clean['order_date'].dt.to_period('M')
 ventas_mes = df_orders_clean.groupby('mes')['total_amount'].sum().reset_index()
 ventas_mes.columns = ['mes', 'total_ventas']
 print("\n📈 Ventas por mes:")
 print(ventas_mes)
 
+# --- GUARDADO ---
 
-#Guardar métricas en CSV
+# Guardar métricas en CSV
 ventas_cliente.to_csv('output/ventas_por_cliente.csv', index=False)
 ventas_mes.to_csv('output/ventas_por_mes.csv', index=False)
 
@@ -118,7 +108,6 @@ ventas_mes.to_csv('output/ventas_por_mes.csv', index=False)
 df_orders_clean.to_csv('output/orders_clean.csv', index=False)
 
 print("✅ Archivos CSV guardados en output/")
-
 
 # Guardar en Parquet
 df_orders_clean.to_parquet('output/orders_clean.parquet', index=False)
