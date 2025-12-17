@@ -1,19 +1,12 @@
-# Python
-__pycache__/
-*.pyc
-
-# Entornos virtuales
+# Entornos
 .venv/
 venv/
-env/
+__pycache__/
 
-# Outputs del ETL
+# Datos grandes / outputs
 output/
-*.csv
+*.parquet
 
-# Variables de entorno
-.env
-
-# Archivos del sistema
+# Sistema
 .DS_Store
 Thumbs.db
